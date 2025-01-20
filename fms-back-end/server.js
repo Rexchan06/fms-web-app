@@ -59,7 +59,7 @@ app.get('/files/:id', async (req, res) => {
 
         const { data, error } = await supabase
             .storage
-            .from('files') // Replace 'files' with your bucket name
+            .from('uploads')
             .download(item.filepath);
 
         if (error) throw error;
@@ -92,7 +92,7 @@ app.post('/items', upload.single("file"), async (req, res) => {
         // Upload file to Supabase Storage
         const { data: fileData, error: uploadError } = await supabase
             .storage
-            .from('files') // Replace 'files' with your bucket name
+            .from('uploads') 
             .upload(filename, req.file.buffer, {
                 contentType: req.file.mimetype
             });
@@ -102,7 +102,7 @@ app.post('/items', upload.single("file"), async (req, res) => {
         // Get the public URL
         const { data: { publicUrl } } = supabase
             .storage
-            .from('files') // Replace 'files' with your bucket name
+            .from('uploads') 
             .getPublicUrl(filename);
 
         // Insert record into Supabase database
@@ -156,13 +156,13 @@ app.put('/items/:id', upload.single('file'), async (req, res) => {
             // Delete the old file
             await supabase
                 .storage
-                .from('files') // Replace 'files' with your bucket name
+                .from('uploads') 
                 .remove([existingItem.filepath]);
 
             // Upload new file
             const { error: uploadError } = await supabase
                 .storage
-                .from('files') // Replace 'files' with your bucket name
+                .from('uploads') 
                 .upload(filename, file.buffer, {
                     contentType: file.mimetype
                 });
@@ -172,7 +172,7 @@ app.put('/items/:id', upload.single('file'), async (req, res) => {
             // Get new public URL
             const { data: { publicUrl } } = supabase
                 .storage
-                .from('files') // Replace 'files' with your bucket name
+                .from('uploads') 
                 .getPublicUrl(filename);
 
             // Update database record
@@ -229,7 +229,7 @@ app.delete('/items/:id', async (req, res) => {
         if (item && item.filepath) {
             const { error: deleteFileError } = await supabase
                 .storage
-                .from('files') // Replace 'files' with your bucket name
+                .from('uploads') 
                 .remove([item.filepath]);
 
             if (deleteFileError) throw deleteFileError;
