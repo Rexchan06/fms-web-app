@@ -79,12 +79,12 @@ export default {
     },
 
     getFileDownloadUrl (item) {
-      return `http://localhost:3002/media/${item.filepath}`;
+      return `https://fms-web-app.onrender.com/media/${item.filepath}`;
     },
 
     async fetchItems() {
       try {
-        const response = await axios.get("http://localhost:3002/items");
+        const response = await axios.get("https://fms-web-app.onrender.com/items");
         this.items = response.data;
       } catch (error) {
         console.error("Error fetching items:", error);
@@ -157,7 +157,7 @@ export default {
         console.log("Sending name:", this.newItem.name);
         console.log("Sending description:", this.newItem.description);
 
-        const response = await axios.post("http://localhost:3002/items", formData, {
+        const response = await axios.post("https://fms-web-app.onrender.com/items", formData, {
             headers: {
                 "Content-Type": "multipart/form-data",
             },
@@ -190,7 +190,7 @@ export default {
           formData.append("file", item.newFile);
         }
 
-        await axios.put(`http://localhost:3002/items/${item.id}`, formData, {
+        await axios.put(`https://fms-web-app.onrender.com/items/${item.id}`, formData, {
           headers: {
             "Content-Type": "multipart/form-data"
           }
@@ -210,7 +210,7 @@ export default {
 
     async deleteItem(id) {
       try {
-        await axios.delete(`http://localhost:3002/items/${id}`)
+        await axios.delete(`https://fms-web-app.onrender.com/items/${id}`)
         await this.fetchItems();
       } catch (error) {
         console.error("Error deleting item:", error);
