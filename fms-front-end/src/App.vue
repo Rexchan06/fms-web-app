@@ -25,7 +25,8 @@
             <a 
               :href="item.url" 
               class="download-link"
-              :download="item.originalName"
+              :download="item.url"
+              target="_blank"
             >
               Download {{ item.originalName }}
             </a>
