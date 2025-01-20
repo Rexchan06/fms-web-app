@@ -23,12 +23,11 @@
             <input v-model="item.name">
             <input v-model="item.description">
             <a 
-                :href="getFileDownloadUrl(item.filepath)" 
-                class="download-link"
-                :download="item.originalName"
-                @click.prevent="downloadFile(item)"
+              :href="item.url" 
+              class="download-link"
+              :download="item.originalName"
             >
-                Download {{ item.originalName }}
+              Download {{ item.originalName }}
             </a>
         </div>
           <div class="item-actions">
@@ -78,10 +77,6 @@ export default {
       item.newFile = event.target.files[0];
     },
 
-    getFileDownloadUrl (item) {
-      return `https://fms-web-app.onrender.com/media/${item.filepath}`;
-    },
-
     async fetchItems() {
       try {
         const response = await axios.get("https://fms-web-app.onrender.com/items");
@@ -92,59 +87,11 @@ export default {
       }
     },
 
-    async downloadFile(item) {
-    try {
-        const response = await axios({
-            url: this.getFileDownloadUrl(item),
-            method: "GET",
-            responseType: "blob",
-            timeout: 30000  // Add timeout of 30 seconds
-        });
-
-        // Verify we got a valid response
-        if (!response.data || response.data.size === 0) {
-            throw new Error('Invalid file data received');
-        }
-
-        // Use FileReader to verify blob content
-        const reader = new FileReader();
-        reader.onload = () => {
-            // Create download link
-            const url = window.URL.createObjectURL(new Blob([response.data]));
-            const link = document.createElement("a");
-            link.href = url;
-            link.setAttribute("download", item.originalName || 'download');
-            
-            // Append to document, click, and cleanup
-            document.body.appendChild(link);
-            setTimeout(() => {  
-                link.click();
-                setTimeout(() => { 
-                    document.body.removeChild(link);
-                    window.URL.revokeObjectURL(url);
-                }, 100);
-            }, 100);
-        };
-        
-        reader.readAsArrayBuffer(response.data);
-
-    } catch (error) {
-        console.error("Download error:", error);
-        if (error.response?.status === 404) {
-            this.errorMessage = "File not found. It may have been deleted or moved.";
-        } else if (error.code === 'ECONNABORTED') {
-            this.errorMessage = "Download timed out. Please try again.";
-        } else {
-            this.errorMessage = "Failed to download file. Please try again.";
-        }
-      }
-    },
-
     async addItem() {
-    try {
+      try {
         if (!this.selectedFile) {
-            this.errorMessage = "Please select a file";
-            return;
+          this.errorMessage = "Please select a file";
+          return;
         }
 
         const formData = new FormData();
@@ -152,20 +99,18 @@ export default {
         formData.append("description", this.newItem.description);
         formData.append("file", this.selectedFile);
 
-        // Log what we're sending
         console.log("Sending file:", this.selectedFile);
         console.log("Sending name:", this.newItem.name);
         console.log("Sending description:", this.newItem.description);
 
         const response = await axios.post("https://fms-web-app.onrender.com/items", formData, {
-            headers: {
-                "Content-Type": "multipart/form-data",
-            },
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
         });
 
         console.log("Upload response:", response.data);
 
-        // Reset form and fetch updated items
         await this.fetchItems();
         this.newItem.name = "";
         this.newItem.description = "";
@@ -173,7 +118,7 @@ export default {
         this.errorMessage = "";
 
         if (this.$refs.fileInput) {
-            this.$refs.fileInput.value = "";
+          this.$refs.fileInput.value = "";
         }
       } catch (error) {
         console.error("Error details:", error.response?.data || error.message);
@@ -210,7 +155,7 @@ export default {
 
     async deleteItem(id) {
       try {
-        await axios.delete(`https://fms-web-app.onrender.com/items/${id}`)
+        await axios.delete(`https://fms-web-app.onrender.com/items/${id}`);
         await this.fetchItems();
       } catch (error) {
         console.error("Error deleting item:", error);

@@ -1,32 +1,22 @@
+const { createClient } = require('@supabase/supabase-js')
 const express = require('express');
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const multer = require("multer");
 const path = require("path");
-const fs = require("fs");
-const db = require("./db")
 
 const app = express();
 const PORT = 3002;
 
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+);
 
-// Configure multer for file upload
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, uploadDir); 
-    },
-    filename: function (req, file, cb) {
-        console.log("Processing file:", file);
-        cb(null, Date.now() + "-" + file.originalname);
-    }
-});
-
+// Configure multer for memory storage instead of disk
 const upload = multer({ 
-    storage: storage,
+    storage: multer.memoryStorage(),
     fileFilter: function (req, file, cb) {
         console.log("Received file:", file);
         cb(null, true);
@@ -37,16 +27,17 @@ const upload = multer({
 app.use(cors());
 app.use(bodyParser.json());
 
-// Serve uploaded files
-app.use('/media', express.static(path.join(__dirname, 'uploads')));
-
 // CRUD Logic
 
 //Get all items
 app.get('/items', async (req, res) => {
     try {
-        const [rows] = await db.query("SELECT * FROM items");
-        res.json(rows);
+        const { data, error } = await supabase
+            .from('items')
+            .select('*');
+        
+        if (error) throw error;
+        res.json(data);
     } catch (err) {
         res.status(500).send(err.message);
     }
@@ -54,27 +45,30 @@ app.get('/items', async (req, res) => {
 
 app.get('/files/:id', async (req, res) => {
     try {
-        const [item] = await db.query("SELECT * FROM items WHERE id = ?", [req.params.id]);
+        const { data: item, error: itemError } = await supabase
+            .from('items')
+            .select('*')
+            .eq('id', req.params.id)
+            .single();
         
-        if (!item || item.length === 0) {
+        if (itemError) throw itemError;
+        if (!item) {
             return res.status(404).send('File not found');
         }
 
-        const file = item[0];
-        const filePath = path.join(__dirname, "uploads", file.filepath);
+        const { data, error } = await supabase
+            .storage
+            .from('files') // Replace 'files' with your bucket name
+            .download(item.filepath);
 
-        // Check if file exists
-        console.log("Checking if file exists:", filePath);
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).send('File not found on server');
-        }
+        if (error) throw error;
 
-        // Set content disposition
-        res.setHeader('Content-Disposition', `attachment; filename="${file.originalName}"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${item.originalName}"`);
         res.setHeader('Content-Type', 'application/octet-stream');
-
+        
         // Send the file
-        res.sendFile(filePath);
+        const buffer = Buffer.from(await data.arrayBuffer());
+        res.send(buffer);
     } catch (error) {
         console.error('Download error:', error);
         res.status(500).send('Error downloading file');
@@ -92,31 +86,41 @@ app.post('/items', upload.single("file"), async (req, res) => {
         }
 
         const { name, description } = req.body;
-        const filename = req.file.filename;
-        const originalName = req.file.originalname;
+        const filename = `${Date.now()}-${req.file.originalname}`;
 
-        console.log("Inserting into database:", {
-            name,
-            description,
-            filename,
-            originalName
-        });
+        // Upload file to Supabase Storage
+        const { data: fileData, error: uploadError } = await supabase
+            .storage
+            .from('files') // Replace 'files' with your bucket name
+            .upload(filename, req.file.buffer, {
+                contentType: req.file.mimetype
+            });
 
-        const [result] = await db.query(
-            "INSERT INTO items (name, description, filepath, originalName) VALUES (?, ?, ?, ?)", 
-            [name, description, filename, originalName]
-        );
+        if (uploadError) throw uploadError;
 
-        const newItem = {
-            id: result.insertId,
-            name,
-            description,
-            filepath: filename,
-            originalName
-        };
+        // Get the public URL
+        const { data: { publicUrl } } = supabase
+            .storage
+            .from('files') // Replace 'files' with your bucket name
+            .getPublicUrl(filename);
 
-        console.log("Successfully created item:", newItem);
-        res.json(newItem);
+        // Insert record into Supabase database
+        const { data: item, error: dbError } = await supabase
+            .from('items')
+            .insert([{
+                name,
+                description,
+                filepath: filename,
+                originalName: req.file.originalname,
+                url: publicUrl
+            }])
+            .select()
+            .single();
+
+        if (dbError) throw dbError;
+
+        console.log("Successfully created item:", item);
+        res.json(item);
     } catch (err) {
         console.error("Error in POST /items:", err);
         res.status(500).json({ 
@@ -134,48 +138,73 @@ app.put('/items/:id', upload.single('file'), async (req, res) => {
 
     try {
         // Get the existing item
-        const [existingItem] = await db.query(
-            "SELECT * FROM items WHERE id = ?", 
-            [id]
-        );
+        const { data: existingItem, error: fetchError } = await supabase
+            .from('items')
+            .select('*')
+            .eq('id', id)
+            .single();
 
-        if (!existingItem || existingItem.length === 0) {
+        if (fetchError || !existingItem) {
             return res.status(404).send("Item not found");
         }
 
         // If there is a new file, update file information
         if (file) {
-            const filename = req.file.filename;
-            // Delete the old file if it exists
-            if (existingItem[0].filepath) {
-                fs.unlink(existingItem[0].filepath, (err) => {
-                    if (err) console.error("Error deleting old file:", err);
-                });
-            }
+            const filename = `${Date.now()}-${file.originalname}`;
 
-            await db.query(
-                "UPDATE items SET name = ?, description = ?, filepath = ?, originalName = ? WHERE id = ?",
-                [
-                    name || existingItem[0].name,
-                    description || existingItem[0].description,
-                    filename,
-                    file.originalname,
-                    id
-                ]
-            );
+            // Delete the old file
+            await supabase
+                .storage
+                .from('files') // Replace 'files' with your bucket name
+                .remove([existingItem.filepath]);
+
+            // Upload new file
+            const { error: uploadError } = await supabase
+                .storage
+                .from('files') // Replace 'files' with your bucket name
+                .upload(filename, file.buffer, {
+                    contentType: file.mimetype
+                });
+
+            if (uploadError) throw uploadError;
+
+            // Get new public URL
+            const { data: { publicUrl } } = supabase
+                .storage
+                .from('files') // Replace 'files' with your bucket name
+                .getPublicUrl(filename);
+
+            // Update database record
+            const { data: updatedItem, error: updateError } = await supabase
+                .from('items')
+                .update({
+                    name: name || existingItem.name,
+                    description: description || existingItem.description,
+                    filepath: filename,
+                    originalName: file.originalname,
+                    url: publicUrl
+                })
+                .eq('id', id)
+                .select()
+                .single();
+
+            if (updateError) throw updateError;
+            res.json(updatedItem);
         } else {
             // If no new file, just update text fields
-            await db.query(
-                "UPDATE items SET name = ?, description = ? WHERE id = ?",
-                [
-                    name || existingItem[0].name,
-                    description || existingItem[0].description,
-                    id
-                ]
-            );
-        }
+            const { data: updatedItem, error: updateError } = await supabase
+                .from('items')
+                .update({
+                    name: name || existingItem.name,
+                    description: description || existingItem.description
+                })
+                .eq('id', id)
+                .select()
+                .single();
 
-        res.json({ id, name, description });
+            if (updateError) throw updateError;
+            res.json(updatedItem);
+        }
     } catch (err) {
         console.error("Error updating item:", err);
         res.status(500).send(err.message);
@@ -186,24 +215,39 @@ app.put('/items/:id', upload.single('file'), async (req, res) => {
 app.delete('/items/:id', async (req, res) => {
     const { id } = req.params;
     try {
-        //Get the file path before deleting the record
-        const [file] = await db.query("SELECT filepath FROM items WHERE id = ?", [id]);
+        // Get the file path before deleting
+        const { data: item, error: fetchError } = await supabase
+            .from('items')
+            .select('filepath')
+            .eq('id', id)
+            .single();
 
-        //Delete the file if it exists
-        if (file[0] && file[0].filepath) {
-            fs.unlink(file[0].filepath, (err) => {
-                if (err) console.error("Error deleting file:", err);
-            });
+        if (fetchError) throw fetchError;
+
+        // Delete the file from storage
+        if (item && item.filepath) {
+            const { error: deleteFileError } = await supabase
+                .storage
+                .from('files') // Replace 'files' with your bucket name
+                .remove([item.filepath]);
+
+            if (deleteFileError) throw deleteFileError;
         }
 
-        await db.query("DELETE FROM items WHERE id = ?", [id]);
-        res.json({ message: "Items deleted" });
+        // Delete the database record
+        const { error: deleteRecordError } = await supabase
+            .from('items')
+            .delete()
+            .eq('id', id);
+
+        if (deleteRecordError) throw deleteRecordError;
+
+        res.json({ message: "Item deleted" });
     } catch (err) {
         res.status(500).send(err.message);
     }
 });
 
-// Starting server
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });
